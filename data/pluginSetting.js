@@ -345,6 +345,12 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     separateReadLorebook: false,
     /**
      * ===========================
+     * 字段库
+     * ===========================
+     */
+    table_field_library: [],
+    /**
+     * ===========================
      * 表格结构
      * ===========================
      */

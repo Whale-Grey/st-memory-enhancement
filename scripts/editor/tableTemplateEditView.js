@@ -6,6 +6,12 @@ import { openSheetStyleRendererPopup } from "./sheetStyleEditor.js";
 import { compareDataDiff } from "../../utils/utility.js";
 import {SheetBase} from "../../core/table/base.js"
 import { Cell } from '../../core/table/cell.js';
+import {
+    openFieldLibraryPopup,
+    createSheetFromFields,
+    insertFieldsToSheet,
+    saveColumnAsField,
+} from './fieldLibraryManager.js';
 
 let drag = null;
 let currentPopupMenu = null;
@@ -138,6 +144,11 @@ function updateSelectedSheetUids() {
 }
 
 function initializeSelect2Dropdown(dropdownElement) {
+    // 销毁已有 select2 实例，防止重复初始化导致事件监听器堆积
+    if ($(dropdownElement).hasClass('select2-hidden-accessible')) {
+        $(dropdownElement).select2('destroy');
+    }
+
     $(dropdownElement).select2({
         closeOnSelect: false,
         templateResult: function (data) {
@@ -160,7 +171,8 @@ function initializeSelect2Dropdown(dropdownElement) {
 
     updateSelect2Dropdown()
 
-    $(dropdownElement).on('change', function (e, silent) {
+    // 先移除旧监听器再绑定，防止多次调用时监听器重复堆积
+    $(dropdownElement).off('change').on('change', function (e, silent) {
         //if(silent || scope === 'chat') return
         console.log("选择了",silent,$(this).val())
         if (silent) return
@@ -344,6 +356,16 @@ function bindCellClickEvent(cell) {
             cell.parent.currentPopupMenu.add('<i class="fa fa-arrow-left"></i> 向左插入列', (e) => { handleAction(cell, Cell.CellAction.insertLeftColumn) });
             cell.parent.currentPopupMenu.add('<i class="fa fa-arrow-right"></i> 向右插入列', (e) => { handleAction(cell, Cell.CellAction.insertRightColumn) });
             cell.parent.currentPopupMenu.add('<i class="fa fa-trash-alt"></i> 删除列', (e) => { handleAction(cell, Cell.CellAction.deleteSelfColumn) });
+            cell.parent.currentPopupMenu.add('<i class="fa-solid fa-layer-group"></i> 保存此列到字段库', async (e) => {
+                await saveColumnAsField(cell);
+            });
+            cell.parent.currentPopupMenu.add('<i class="fa-solid fa-table-columns"></i> 从字段库添加列', async (e) => {
+                const ok = await insertFieldsToSheet(cell.parent);
+                if (ok) {
+                    refreshTempView();
+                    if (scope === 'chat') BASE.refreshContextView();
+                }
+            });
         } else if (colIndex === 0) {
             // if (sheetType === cell.parent.SheetType.dynamic) {
             //     cell.element.delete();
@@ -544,6 +566,29 @@ async function initTableEdit(mesId) {
     $(document).on('click', '#export_table_template_button', function () {
 
     })
+
+    // 字段库管理按钮
+    $(document).on('click', '#open_field_library_button', async function () {
+        await openFieldLibraryPopup();
+    });
+
+    // 从字段库组合新表格
+    $(document).on('click', '#add_table_from_library_button', async function () {
+        const newSheet = await createSheetFromFields(scope);
+        if (!newSheet) return;
+
+        if (scope === 'chat') USER.saveChat();
+        else USER.saveSettings();
+
+        let currentSelectedValues = getSelectedSheetUids();
+        setSelectedSheetUids([...currentSelectedValues, newSheet.uid]);
+        if (scope === 'chat') USER.saveChat();
+        else USER.saveSettings();
+
+        await updateDropdownElement();
+        $(dropdownElement).val([...currentSelectedValues, newSheet.uid]).trigger('change', [true]);
+        updateSelectedSheetUids();
+    });
     // $(document).on('click', '#sort_table_template_button', function () {
     //
     // })
