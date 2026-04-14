@@ -88,6 +88,37 @@ export const USER = {
         console.log("全局模板", templates)
         return templates;
     },
+    /**
+     * 获取当前角色卡专属的扩展数据对象（自动初始化）。
+     * 未选中角色时返回 null。
+     */
+    getCharacterExtensionData() {
+        try {
+            const ctx = APP.getContext();
+            const chid = ctx.this_chid;
+            if (chid === null || chid === undefined) return null;
+            const char = ctx.characters?.[chid];
+            if (!char) return null;
+            if (!char.data) char.data = {};
+            if (!char.data.extensions) char.data.extensions = {};
+            const KEY = 'st-memory-enhancement';
+            if (!char.data.extensions[KEY]) char.data.extensions[KEY] = {};
+            return char.data.extensions[KEY];
+        } catch (e) {
+            console.warn('[ST-Memory] getCharacterExtensionData failed:', e);
+            return null;
+        }
+    },
+    /** 保存当前角色卡到服务器（debounced）。 */
+    saveCharacter() {
+        try {
+            if (typeof APP.saveCharacterDebounced === 'function') {
+                return APP.saveCharacterDebounced();
+            }
+        } catch (e) {
+            console.warn('[ST-Memory] saveCharacter failed:', e);
+        }
+    },
     tableBaseSetting: createProxyWithUserSetting('muyoo_dataTable'),
     tableBaseDefaultSettings: { ...defaultSettings },
     IMPORTANT_USER_PRIVACY_DATA: createProxyWithUserSetting('IMPORTANT_USER_PRIVACY_DATA', true),
@@ -112,6 +143,13 @@ export const BASE = {
     updateSystemMessageTableStatus: updateSystemMessageTableStatus,
     get templates() {
         return USER.loadUserAllTemplates()
+    },
+    /** 获取当前角色卡的角色域模板列表（原始数据数组）。 */
+    getRoleTemplates() {
+        const extData = USER.getCharacterExtensionData();
+        if (!extData) return [];
+        if (!Array.isArray(extData.role_templates)) extData.role_templates = [];
+        return extData.role_templates;
     },
     contextViewRefreshing: false,
     sheetsData: new Proxy({}, {

@@ -73,37 +73,79 @@ export class SheetTemplate extends SheetBase {
     }
 
     /**
-     * 保存表格数据
+     * 创建一个角色域（role）模板。
+     * 数据保存在当前角色卡的 data.extensions 中，随角色卡导入/导出。
+     */
+    createNewRoleTemplate(column = 2, row = 2) {
+        this.domain = SheetBase.SheetDomain.role;
+        this.init(column, row);
+        this.uid = `role_${SYSTEM.generateRandomString(8)}`;
+        this.name = `角色模板_${this.uid.slice(-4)}`;
+        this.loadCells();
+        this.save();
+        return this;
+    }
+
+    /**
+     * 保存表格数据。
+     * - domain === 'role'：保存到当前角色卡的 data.extensions
+     * - 其他：保存到全局插件设置
      * @returns {SheetTemplate}
      */
     save(manualSave = false) {
-        let templates = BASE.templates;
-        if (!templates) templates = [];
         try {
+            if (this.domain === SheetBase.SheetDomain.role) {
+                // ── 角色域：写入角色卡扩展数据 ──
+                const extData = USER.getCharacterExtensionData?.();
+                if (!extData) {
+                    console.warn('[ST-Memory] 保存角色模板失败：未找到角色卡数据');
+                    return null;
+                }
+                if (!Array.isArray(extData.role_templates)) extData.role_templates = [];
+                const data = this.filterSavingData();
+                const idx = extData.role_templates.findIndex(t => t.uid === data.uid);
+                if (idx >= 0) {
+                    extData.role_templates[idx] = data;
+                } else {
+                    extData.role_templates.push(data);
+                }
+                if (!manualSave) USER.saveCharacter?.();
+                return this;
+            }
+
+            // ── 全局域：写入插件设置 ──
+            let templates = BASE.templates;
+            if (!templates) templates = [];
             const sheetDataToSave = this.filterSavingData();
             if (templates.some(t => t.uid === sheetDataToSave.uid)) {
                 templates = templates.map(t => t.uid === sheetDataToSave.uid ? sheetDataToSave : t);
             } else {
                 templates.push(sheetDataToSave);
             }
-            console.log("保存模板数据", templates)
+            console.log("保存模板数据", templates);
             USER.getSettings().table_database_templates = templates;
-            if(!manualSave) USER.saveSettings();
+            if (!manualSave) USER.saveSettings();
             return this;
         } catch (e) {
             EDITOR.error(`保存模板失败`, e.message, e);
             return null;
         }
     }
+
     /**
-     * 删除表格数据，根据 domain 决定删除的位置
-     * @returns {*}
+     * 删除表格数据，根据 domain 决定删除的位置。
      */
     delete() {
+        if (this.domain === SheetBase.SheetDomain.role) {
+            const extData = USER.getCharacterExtensionData?.();
+            if (!extData) return;
+            extData.role_templates = (extData.role_templates ?? []).filter(t => t.uid !== this.uid);
+            USER.saveCharacter?.();
+            return;
+        }
         let templates = BASE.templates;
         USER.getSettings().table_database_templates = templates.filter(t => t.uid !== this.uid);
         USER.saveSettings();
-        return templates;
     }
 
     /** _______________________________________ 以下函数不进行外部调用 _______________________________________ */
@@ -114,9 +156,12 @@ export class SheetTemplate extends SheetBase {
             this.init();
             return this;
         }
-        // 从模板库中加载
+        // 先在全局模板库中查找，再在角色卡扩展数据中查找
         let targetUid = target?.uid || target;
         let targetSheetData = BASE.templates?.find(t => t.uid === targetUid);
+        if (!targetSheetData) {
+            targetSheetData = BASE.getRoleTemplates?.()?.find(t => t.uid === targetUid);
+        }
         if (targetSheetData?.uid) {
             Object.assign(this, targetSheetData);
             this.loadCells();

@@ -135,11 +135,14 @@ function initChatScopeSelectedSheets() {
 
 function updateSelectedSheetUids() {
     if (scope === 'chat') {
-        USER.saveChat()
-        console.log("这里触发的")
-        BASE.refreshContextView()
+        USER.saveChat();
+        console.log("这里触发的");
+        BASE.refreshContextView();
+    } else if (scope === 'role') {
+        USER.saveCharacter();
+    } else {
+        USER.saveSettings();
     }
-    else USER.saveSettings();
     updateDragTables();
 }
 
@@ -410,12 +413,17 @@ function bindCellClickEvent(cell) {
 }
 
 function getSelectedSheetUids() {
-    return scope === 'chat' ? USER.getContext().chatMetadata.selected_sheets ?? initChatScopeSelectedSheets() : USER.getSettings().table_selected_sheets ?? []
+    if (scope === 'chat') return USER.getContext().chatMetadata.selected_sheets ?? initChatScopeSelectedSheets();
+    if (scope === 'role') return USER.getCharacterExtensionData()?.role_selected_sheets ?? [];
+    return USER.getSettings().table_selected_sheets ?? [];
 }
 
 function setSelectedSheetUids(selectedSheets) {
     if (scope === 'chat') {
         USER.getContext().chatMetadata.selected_sheets = selectedSheets;
+    } else if (scope === 'role') {
+        const extData = USER.getCharacterExtensionData();
+        if (extData) extData.role_selected_sheets = selectedSheets;
     } else {
         USER.getSettings().table_selected_sheets = selectedSheets;
     }
@@ -423,7 +431,15 @@ function setSelectedSheetUids(selectedSheets) {
 }
 
 function getSheets() {
-    return scope === 'chat' ? BASE.getChatSheets() : BASE.templates
+    if (scope === 'chat') return BASE.getChatSheets();
+    if (scope === 'role') {
+        // 将原始数据包装成 SheetTemplate 实例，供下拉列表使用
+        return BASE.getRoleTemplates().map(t => {
+            try { return new BASE.SheetTemplate(t.uid); }
+            catch (e) { return null; }
+        }).filter(Boolean);
+    }
+    return BASE.templates;
 }
 
 
@@ -432,7 +448,8 @@ async function updateDragTables() {
 
     const selectedSheetUids = getSelectedSheetUids()
     const container = $(drag.render).find('#tableContainer');
-    table_editor_container.querySelector('#contentContainer').style.outlineColor = scope === 'chat' ? '#cf6e64' : '#41b681';
+    const scopeColor = scope === 'chat' ? '#cf6e64' : scope === 'role' ? '#a06fd1' : '#41b681';
+    table_editor_container.querySelector('#contentContainer').style.outlineColor = scopeColor;
 
     if (currentPopupMenu) {
         currentPopupMenu.destroy();
@@ -446,10 +463,10 @@ async function updateDragTables() {
 
         let sheetDataExists;
         if (scope === 'chat') {
-            // 检查 uid 是否存在于 BASE.sheetsData.context
             sheetDataExists = BASE.sheetsData.context?.some(sheetData => sheetData.uid === uid);
+        } else if (scope === 'role') {
+            sheetDataExists = BASE.getRoleTemplates()?.some(t => t.uid === uid);
         } else {
-            // 检查 uid 是否存在于 BASE.templates
             sheetDataExists = BASE.templates?.some(templateData => templateData.uid === uid);
         }
         // 如果数据不存在，则记录警告并跳过此 uid
@@ -539,26 +556,34 @@ async function initTableEdit(mesId) {
 
     $(document).on('click', '#add_table_template_button', async function () {
         console.log("触发")
-        let newTemplateUid = null
-        let newTemplate = null
+        let newTemplateUid = null;
+        let newTemplate = null;
         if (scope === 'chat') {
-            newTemplate = BASE.createChatSheet(2, 1)
-            newTemplateUid = newTemplate.uid
-            newTemplate.save()
+            newTemplate = BASE.createChatSheet(2, 1);
+            newTemplateUid = newTemplate.uid;
+            newTemplate.save();
+        } else if (scope === 'role') {
+            const extData = USER.getCharacterExtensionData();
+            if (!extData) {
+                alert('未选中角色卡，无法创建角色域模板。');
+                return;
+            }
+            newTemplate = new BASE.SheetTemplate().createNewRoleTemplate();
+            newTemplateUid = newTemplate.uid;
         } else {
             newTemplate = new BASE.SheetTemplate().createNewTemplate();
-            newTemplateUid = newTemplate.uid
+            newTemplateUid = newTemplate.uid;
         }
 
-        let currentSelectedValues = getSelectedSheetUids()
-        setSelectedSheetUids([...currentSelectedValues, newTemplateUid])
-        if (scope === 'chat') USER.saveChat()
+        let currentSelectedValues = getSelectedSheetUids();
+        setSelectedSheetUids([...currentSelectedValues, newTemplateUid]);
+        if (scope === 'chat') USER.saveChat();
+        else if (scope === 'role') USER.saveCharacter();
         else USER.saveSettings();
         await updateDropdownElement();
-        //updateDragTables();
-        console.log("测试", [...currentSelectedValues, newTemplateUid])
+        console.log("测试", [...currentSelectedValues, newTemplateUid]);
         $(dropdownElement).val([...currentSelectedValues, newTemplateUid]).trigger("change", [true]);
-        updateSelectedSheetUids()
+        updateSelectedSheetUids();
     });
     $(document).on('click', '#import_table_template_button', function () {
 
@@ -574,15 +599,17 @@ async function initTableEdit(mesId) {
 
     // 从字段库组合新表格
     $(document).on('click', '#add_table_from_library_button', async function () {
+        if (scope === 'role' && !USER.getCharacterExtensionData()) {
+            alert('未选中角色卡，无法创建角色域模板。');
+            return;
+        }
         const newSheet = await createSheetFromFields(scope);
         if (!newSheet) return;
-
-        if (scope === 'chat') USER.saveChat();
-        else USER.saveSettings();
 
         let currentSelectedValues = getSelectedSheetUids();
         setSelectedSheetUids([...currentSelectedValues, newSheet.uid]);
         if (scope === 'chat') USER.saveChat();
+        else if (scope === 'role') USER.saveCharacter();
         else USER.saveSettings();
 
         await updateDropdownElement();

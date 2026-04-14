@@ -294,6 +294,90 @@ async function resetSettings() {
     }
 }
 
+// ============================================================
+// 消息模板作用域（全局/角色/聊天）相关辅助函数
+// ============================================================
+
+/** 获取当前角色卡的消息模板覆盖设置 */
+function getRoleTemplateSettings() {
+    const extData = USER.getCharacterExtensionData();
+    if (!extData) return null;
+    return extData.template_settings || null;
+}
+
+/** 保存角色卡的消息模板覆盖设置 */
+function saveRoleTemplateSettings(settings) {
+    const extData = USER.getCharacterExtensionData();
+    if (!extData) {
+        EDITOR.warning('未选中角色卡，无法保存角色专属设置');
+        return false;
+    }
+    extData.template_settings = settings;
+    USER.saveCharacter();
+    return true;
+}
+
+/** 获取当前聊天的消息模板覆盖设置 */
+function getChatTemplateSettings() {
+    const meta = USER.getContext()?.chatMetadata;
+    if (!meta) return null;
+    return meta.st_memory_template || null;
+}
+
+/** 保存当前聊天的消息模板覆盖设置 */
+function saveChatTemplateSettings(settings) {
+    const meta = USER.getContext()?.chatMetadata;
+    if (!meta) {
+        EDITOR.warning('当前没有打开的聊天，无法保存聊天专属设置');
+        return false;
+    }
+    meta.st_memory_template = settings;
+    USER.saveChat();
+    return true;
+}
+
+/** 渲染角色模板标签页 */
+function renderRoleTemplateTab() {
+    const roleSettings = getRoleTemplateSettings();
+    const hasChar = USER.getCharacterExtensionData() !== null;
+    const enabled = hasChar && (roleSettings?.enabled === true);
+
+    $('#msg_template_role_enable').prop('checked', enabled).prop('disabled', !hasChar);
+    $('#msg_template_role_fields').toggle(enabled);
+
+    if (enabled && roleSettings) {
+        $(`#dataTable_injection_mode_role option[value="${roleSettings.injection_mode}"]`).prop('selected', true);
+        $('#dataTable_message_template_role').val(roleSettings.message_template ?? '');
+        $('#dataTable_deep_role').val(roleSettings.deep ?? 2);
+    }
+}
+
+/** 渲染聊天模板标签页 */
+function renderChatTemplateTab() {
+    const chatSettings = getChatTemplateSettings();
+    const hasMeta = !!USER.getContext()?.chatMetadata;
+    const enabled = hasMeta && (chatSettings?.enabled === true);
+
+    $('#msg_template_chat_enable').prop('checked', enabled).prop('disabled', !hasMeta);
+    $('#msg_template_chat_fields').toggle(enabled);
+
+    if (enabled && chatSettings) {
+        $(`#dataTable_injection_mode_chat option[value="${chatSettings.injection_mode}"]`).prop('selected', true);
+        $('#dataTable_message_template_chat').val(chatSettings.message_template ?? '');
+        $('#dataTable_deep_chat').val(chatSettings.deep ?? 2);
+    }
+}
+
+/** 切换消息模板标签页 */
+function switchMsgTemplateTab(scope) {
+    $('.msg_template_tab').css('background', '');
+    $(`#msg_template_tab_${scope}`).css('background', 'var(--SmartThemeQuoteColor, rgba(100,149,237,0.3))');
+    $('.msg_template_panel').hide();
+    $(`#msg_template_panel_${scope}`).show();
+    if (scope === 'role') renderRoleTemplateTab();
+    else if (scope === 'chat') renderChatTemplateTab();
+}
+
 function InitBinging() {
     console.log('初始化绑定')
     // 开始绑定事件
@@ -331,9 +415,80 @@ function InitBinging() {
         EDITOR.success(this.checked ? 'AI的更改现在会被写入表格' : 'AI的更改现在不会被写入表格');
     });
 
-    // 表格插入模式
+    // 表格插入模式（全局）
     $('#dataTable_injection_mode').change(function (event) {
         USER.tableBaseSetting.injection_mode = event.target.value;
+    });
+
+    // 消息模板作用域标签切换
+    $(document).on('click', '.msg_template_tab', function () {
+        switchMsgTemplateTab($(this).data('scope'));
+    });
+
+    // 角色专属模板启用开关
+    $('#msg_template_role_enable').on('change', function () {
+        const enabled = this.checked;
+        $('#msg_template_role_fields').toggle(enabled);
+        const existing = getRoleTemplateSettings() || {};
+        if (enabled && !existing.message_template) {
+            existing.message_template = USER.tableBaseSetting.message_template;
+            existing.injection_mode = USER.tableBaseSetting.injection_mode;
+            existing.deep = USER.tableBaseSetting.deep;
+            $(`#dataTable_injection_mode_role option[value="${existing.injection_mode}"]`).prop('selected', true);
+            $('#dataTable_message_template_role').val(existing.message_template);
+            $('#dataTable_deep_role').val(existing.deep);
+        }
+        existing.enabled = enabled;
+        saveRoleTemplateSettings(existing);
+    });
+    $('#dataTable_message_template_role').on('input', function () {
+        const settings = getRoleTemplateSettings() || { enabled: true };
+        settings.message_template = $(this).val();
+        saveRoleTemplateSettings(settings);
+    });
+    $('#dataTable_injection_mode_role').on('change', function () {
+        const settings = getRoleTemplateSettings() || { enabled: true };
+        settings.injection_mode = $(this).val();
+        saveRoleTemplateSettings(settings);
+    });
+    $('#dataTable_deep_role').on('input', function () {
+        const settings = getRoleTemplateSettings() || { enabled: true };
+        settings.deep = Math.abs(Number($(this).val()));
+        saveRoleTemplateSettings(settings);
+    });
+
+    // 聊天专属模板启用开关
+    $('#msg_template_chat_enable').on('change', function () {
+        const enabled = this.checked;
+        $('#msg_template_chat_fields').toggle(enabled);
+        const existing = getChatTemplateSettings() || {};
+        if (enabled && !existing.message_template) {
+            const roleSettings = getRoleTemplateSettings();
+            const base = (roleSettings?.enabled && roleSettings) || USER.tableBaseSetting;
+            existing.message_template = base.message_template;
+            existing.injection_mode = base.injection_mode;
+            existing.deep = base.deep;
+            $(`#dataTable_injection_mode_chat option[value="${existing.injection_mode}"]`).prop('selected', true);
+            $('#dataTable_message_template_chat').val(existing.message_template);
+            $('#dataTable_deep_chat').val(existing.deep);
+        }
+        existing.enabled = enabled;
+        saveChatTemplateSettings(existing);
+    });
+    $('#dataTable_message_template_chat').on('input', function () {
+        const settings = getChatTemplateSettings() || { enabled: true };
+        settings.message_template = $(this).val();
+        saveChatTemplateSettings(settings);
+    });
+    $('#dataTable_injection_mode_chat').on('change', function () {
+        const settings = getChatTemplateSettings() || { enabled: true };
+        settings.injection_mode = $(this).val();
+        saveChatTemplateSettings(settings);
+    });
+    $('#dataTable_deep_chat').on('input', function () {
+        const settings = getChatTemplateSettings() || { enabled: true };
+        settings.deep = Math.abs(Number($(this).val()));
+        saveChatTemplateSettings(settings);
     });
     $("#fill_table_time").change(function() {
         const value = $(this).val();
@@ -570,6 +725,8 @@ export function renderSetting() {
     $(`#table_cell_width_mode option[value="${USER.tableBaseSetting.table_cell_width_mode}"]`).prop('selected', true);
     $('#dataTable_message_template').val(USER.tableBaseSetting.message_template);
     $('#dataTable_deep').val(USER.tableBaseSetting.deep);
+    // 初始化消息模板标签页（默认显示全局）
+    switchMsgTemplateTab('global');
     $('#clear_up_stairs').val(USER.tableBaseSetting.clear_up_stairs);
     $('#clear_up_stairs_value').text(USER.tableBaseSetting.clear_up_stairs);
     $('#rebuild_token_limit').val(USER.tableBaseSetting.rebuild_token_limit_value);

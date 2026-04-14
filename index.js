@@ -179,7 +179,8 @@ export function findNextChatWhitTableData(startIndex, isIncludeStartIndex = fals
  * @returns 生成的完整提示词
  */
 export function initTableData(eventData) {
-    const allPrompt = USER.tableBaseSetting.message_template.replace('{{tableData}}', getTablePrompt(eventData))
+    const effectiveSettings = getEffectiveTemplateSettings();
+    const allPrompt = effectiveSettings.message_template.replace('{{tableData}}', getTablePrompt(eventData))
     const promptContent = replaceUserTag(allPrompt)  //替换所有的<user>标签
     console.log("完整提示", promptContent)
     return promptContent
@@ -521,11 +522,30 @@ export function replaceTableEditTag(chat, newContent) {
 }
 
 /**
+ * 获取有效的消息模板设置（级联：聊天 > 角色 > 全局）
+ * @returns {{ message_template: string, injection_mode: string, deep: number }}
+ */
+function getEffectiveTemplateSettings() {
+    // 聊天级别（最高优先级）
+    const chatMeta = USER.getContext()?.chatMetadata;
+    const chatSettings = chatMeta?.st_memory_template;
+    if (chatSettings?.enabled) return chatSettings;
+
+    // 角色级别
+    const extData = USER.getCharacterExtensionData?.();
+    const roleSettings = extData?.template_settings;
+    if (roleSettings?.enabled) return roleSettings;
+
+    // 全局（兜底）
+    return USER.tableBaseSetting;
+}
+
+/**
  * 读取设置中的注入角色
  * @returns 注入角色
  */
 function getMesRole() {
-    switch (USER.tableBaseSetting.injection_mode) {
+    switch (getEffectiveTemplateSettings().injection_mode) {
         case 'deep_system':
             return 'system'
         case 'deep_user':
@@ -542,17 +562,18 @@ function getMesRole() {
  */
 async function onChatCompletionPromptReady(eventData) {
     try {
+        const effectiveSettings = getEffectiveTemplateSettings();
         // 优先处理分步填表模式
         if (USER.tableBaseSetting.step_by_step === true) {
             // 仅当插件和AI读表功能开启,注入模式不是关闭注入时才注入
-            if (USER.tableBaseSetting.isExtensionAble === true && USER.tableBaseSetting.isAiReadTable === true && USER.tableBaseSetting.injection_mode !== "injection_off") {
+            if (USER.tableBaseSetting.isExtensionAble === true && USER.tableBaseSetting.isAiReadTable === true && effectiveSettings.injection_mode !== "injection_off") {
                 const tableData = getTablePrompt(eventData, true); // 获取纯净数据
                 if (tableData) { // 确保有内容可注入
                     const finalPrompt = `以下是通过表格记录的当前场景信息以及历史记录信息，你需要以此为参考进行思考：\n${tableData}`;
-                    if (USER.tableBaseSetting.deep === 0) {
+                    if (effectiveSettings.deep === 0) {
                         eventData.chat.push({ role: getMesRole(), content: finalPrompt });
                     } else {
-                        eventData.chat.splice(-USER.tableBaseSetting.deep, 0, { role: getMesRole(), content: finalPrompt });
+                        eventData.chat.splice(-effectiveSettings.deep, 0, { role: getMesRole(), content: finalPrompt });
                     }
                     console.log("分步填表模式：注入只读表格数据", eventData.chat);
                 }
@@ -564,16 +585,16 @@ async function onChatCompletionPromptReady(eventData) {
         if (eventData.dryRun === true ||
             USER.tableBaseSetting.isExtensionAble === false ||
             USER.tableBaseSetting.isAiReadTable === false ||
-            USER.tableBaseSetting.injection_mode === "injection_off") {
+            effectiveSettings.injection_mode === "injection_off") {
             return;
         }
 
         console.log("生成提示词前", USER.getContext().chat)
         const promptContent = initTableData(eventData)
-        if (USER.tableBaseSetting.deep === 0)
+        if (effectiveSettings.deep === 0)
             eventData.chat.push({ role: getMesRole(), content: promptContent })
         else
-            eventData.chat.splice(-USER.tableBaseSetting.deep, 0, { role: getMesRole(), content: promptContent })
+            eventData.chat.splice(-effectiveSettings.deep, 0, { role: getMesRole(), content: promptContent })
 
         updateSheetsView()
     } catch (error) {

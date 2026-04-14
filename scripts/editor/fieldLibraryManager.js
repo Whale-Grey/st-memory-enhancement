@@ -6,11 +6,6 @@ import { Form } from '../../components/formManager.js';
 // ─────────────────────────────────────────────────────────────
 // 数据层：字段库的读写
 // 字段结构：{ uid, name, value, columnDataType, description }
-//   uid            - 唯一标识符
-//   name           - 在字段库中显示的名称（可与列标题不同）
-//   value          - 插入表格时使用的列标题文字
-//   columnDataType - 数据类型，目前仅支持 'text'
-//   description    - 说明（仅显示在字段库中，不影响表格）
 // ─────────────────────────────────────────────────────────────
 
 function getLibrary() {
@@ -209,9 +204,11 @@ export async function openFieldLibraryPopup() {
 
 /**
  * 打开字段选取弹窗，让用户从字段库中勾选字段。
- * @param {string} title   - 弹窗标题
- * @param {string} subtitle - 弹窗副标题说明
- * @returns {Array|null} 选中的字段对象数组，取消返回 null，空选返回 null
+ * 注意：必须用 DOM 容器元素而非 HTML 字符串，
+ * 因为 SillyTavern Popup 在 show() resolve 后移除 DOM，
+ * 若用字符串则 popup 关闭后无法读取 checkbox 状态。
+ *
+ * @returns {Array|null} 选中的字段对象数组，取消或空选返回 null
  */
 async function openFieldPickerPopup(title, subtitle) {
     const lib = getLibrary();
@@ -220,45 +217,44 @@ async function openFieldPickerPopup(title, subtitle) {
         return null;
     }
 
-    const itemsHTML = lib.map(f => `
-        <label style="
-            display:flex; align-items:center; gap:10px; padding:8px 10px;
-            border:1px solid var(--SmartThemeBorderColor); border-radius:4px;
-            background:var(--SmartThemeBlurTintColor); cursor:pointer;
-            transition: background 0.1s;
-        ">
-            <input type="checkbox" class="fp-cb" value="${f.uid}"
-                   style="flex-shrink:0; width:15px; height:15px;" />
-            <div style="flex:1;">
-                <div style="font-weight:bold; font-size:0.9rem;">${f.name}</div>
-                <div style="font-size:0.75rem; color:var(--SmartThemeEmColor); margin-top:2px;">
-                    列标题：${f.value || '<em>未设置</em>'}
-                    &nbsp;·&nbsp;
-                    ${TYPE_LABEL[f.columnDataType] || f.columnDataType}
-                    ${f.description ? `&nbsp;·&nbsp; ${f.description}` : ''}
+    // 构建 DOM 元素（保持对容器的引用，popup 关闭后仍可读取）
+    const container = document.createElement('div');
+    container.className = 'wide100p padding5 dataBankAttachments';
+    container.innerHTML = `
+        <h2 class="marginBot5"><span>${title}</span></h2>
+        <small>${subtitle}</small>
+        <hr/>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            ${lib.map(f => `
+            <label style="
+                display:flex; align-items:center; gap:10px; padding:8px 10px;
+                border:1px solid var(--SmartThemeBorderColor); border-radius:4px;
+                background:var(--SmartThemeBlurTintColor); cursor:pointer;
+            ">
+                <input type="checkbox" class="fp-cb" value="${f.uid}"
+                       style="flex-shrink:0; width:15px; height:15px;" />
+                <div style="flex:1;">
+                    <div style="font-weight:bold; font-size:0.9rem;">${f.name}</div>
+                    <div style="font-size:0.75rem; color:var(--SmartThemeEmColor); margin-top:2px;">
+                        列标题：${f.value || '<em>未设置</em>'}
+                        &nbsp;·&nbsp;
+                        ${TYPE_LABEL[f.columnDataType] || f.columnDataType}
+                        ${f.description ? `&nbsp;·&nbsp; ${f.description}` : ''}
+                    </div>
                 </div>
-            </div>
-        </label>`).join('');
-
-    const html = `
-        <div class="wide100p padding5 dataBankAttachments">
-            <h2 class="marginBot5"><span>${title}</span></h2>
-            <small>${subtitle}</small>
-            <hr/>
-            <div style="display:flex; flex-direction:column; gap:6px;">
-                ${itemsHTML}
-            </div>
+            </label>`).join('')}
         </div>`;
 
-    const popup = new EDITOR.Popup(html, EDITOR.POPUP_TYPE.CONFIRM, '', {
+    const popup = new EDITOR.Popup(container, EDITOR.POPUP_TYPE.CONFIRM, '', {
         okButton: '确认', cancelButton: '取消', allowVerticalScrolling: true,
     });
     await popup.show();
 
     if (!popup.result) return null;
 
+    // 从容器元素内读取勾选状态（即使已从文档 DOM 移除，容器本身仍在内存中）
     const selectedUids = Array.from(
-        document.querySelectorAll('.fp-cb:checked'),
+        container.querySelectorAll('.fp-cb:checked'),
     ).map(cb => cb.value);
 
     if (selectedUids.length === 0) return null;
@@ -271,8 +267,6 @@ async function openFieldPickerPopup(title, subtitle) {
 
 /**
  * 将字段插入到已有的 sheet/template 中（作为新列追加到最右侧）。
- * @param {object} sheet - Sheet 或 SheetTemplate 实例
- * @returns {boolean} 是否成功插入
  */
 export async function insertFieldsToSheet(sheet) {
     const fields = await openFieldPickerPopup(
@@ -281,16 +275,14 @@ export async function insertFieldsToSheet(sheet) {
     );
     if (!fields) return false;
 
-    // 获取当前最右侧的列标题单元格
+    // 从最右侧的列标题开始依次向右插入
     let lastHeader = sheet.cells.get(
         sheet.hashSheet[0][sheet.hashSheet[0].length - 1],
     );
 
     fields.forEach(field => {
-        // insertRightColumn 会在 hashSheet 中新增一列，isSave=false 暂不保存
         lastHeader.newAction('insertRightColumn', undefined, false);
 
-        // 新列标题现在在 hashSheet[0] 的最末位
         const newHeader = sheet.cells.get(
             sheet.hashSheet[0][sheet.hashSheet[0].length - 1],
         );
@@ -307,8 +299,6 @@ export async function insertFieldsToSheet(sheet) {
 
 /**
  * 将当前列标题单元格的定义保存到字段库。
- * @param {object} cell - column_header 类型的 Cell 实例
- * @returns {boolean} 是否保存成功
  */
 export async function saveColumnAsField(cell) {
     const result = await openFieldEditPopup({
@@ -326,7 +316,7 @@ export async function saveColumnAsField(cell) {
  * 从字段库中选取字段，创建一张新的 sheet/template。
  * 只负责创建并返回新对象，不负责更新 UI 下拉列表（由调用方处理）。
  *
- * @param {string} scope - 'chat' 或 'global'
+ * @param {string} scope - 'chat' | 'global' | 'role'
  * @returns {object|null} 创建的 sheet/template 实例，取消返回 null
  */
 export async function createSheetFromFields(scope) {
@@ -336,48 +326,48 @@ export async function createSheetFromFields(scope) {
         return null;
     }
 
-    const itemsHTML = lib.map(f => `
-        <label style="
-            display:flex; align-items:center; gap:10px; padding:8px 10px;
-            border:1px solid var(--SmartThemeBorderColor); border-radius:4px;
-            background:var(--SmartThemeBlurTintColor); cursor:pointer;
-        ">
-            <input type="checkbox" class="cff-cb" value="${f.uid}"
-                   style="flex-shrink:0; width:15px; height:15px;" />
-            <div style="flex:1;">
-                <div style="font-weight:bold; font-size:0.9rem;">${f.name}</div>
-                <div style="font-size:0.75rem; color:var(--SmartThemeEmColor); margin-top:2px;">
-                    列标题：${f.value || '<em>未设置</em>'}
-                    &nbsp;·&nbsp;
-                    ${TYPE_LABEL[f.columnDataType] || f.columnDataType}
-                    ${f.description ? `&nbsp;·&nbsp; ${f.description}` : ''}
+    // 同样用 DOM 容器而非 HTML 字符串，确保弹窗关闭后仍能读取输入值
+    const container = document.createElement('div');
+    container.className = 'wide100p padding5 dataBankAttachments';
+    container.innerHTML = `
+        <h2 class="marginBot5"><span>从字段库创建表格</span></h2>
+        <small>选择字段，将按选中顺序作为新表格的列；并为表格设置名称。</small>
+        <hr/>
+        <div style="margin-bottom:14px;">
+            <label style="display:block; margin-bottom:4px;">表格名称</label>
+            <input type="text" id="cff-name" class="text_pole" value="新表格" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            ${lib.map(f => `
+            <label style="
+                display:flex; align-items:center; gap:10px; padding:8px 10px;
+                border:1px solid var(--SmartThemeBorderColor); border-radius:4px;
+                background:var(--SmartThemeBlurTintColor); cursor:pointer;
+            ">
+                <input type="checkbox" class="cff-cb" value="${f.uid}"
+                       style="flex-shrink:0; width:15px; height:15px;" />
+                <div style="flex:1;">
+                    <div style="font-weight:bold; font-size:0.9rem;">${f.name}</div>
+                    <div style="font-size:0.75rem; color:var(--SmartThemeEmColor); margin-top:2px;">
+                        列标题：${f.value || '<em>未设置</em>'}
+                        &nbsp;·&nbsp;
+                        ${TYPE_LABEL[f.columnDataType] || f.columnDataType}
+                        ${f.description ? `&nbsp;·&nbsp; ${f.description}` : ''}
+                    </div>
                 </div>
-            </div>
-        </label>`).join('');
-
-    const html = `
-        <div class="wide100p padding5 dataBankAttachments">
-            <h2 class="marginBot5"><span>从字段库创建表格</span></h2>
-            <small>选择字段，将按选中顺序作为新表格的列；并为表格设置名称。</small>
-            <hr/>
-            <div style="margin-bottom:14px;">
-                <label style="display:block; margin-bottom:4px;">表格名称</label>
-                <input type="text" id="cff-name" class="text_pole" value="新表格" />
-            </div>
-            <div style="display:flex; flex-direction:column; gap:6px;">
-                ${itemsHTML}
-            </div>
+            </label>`).join('')}
         </div>`;
 
-    const popup = new EDITOR.Popup(html, EDITOR.POPUP_TYPE.CONFIRM, '', {
+    const popup = new EDITOR.Popup(container, EDITOR.POPUP_TYPE.CONFIRM, '', {
         okButton: '创建表格', cancelButton: '取消', allowVerticalScrolling: true,
     });
     await popup.show();
     if (!popup.result) return null;
 
-    const tableName = (document.querySelector('#cff-name')?.value || '新表格').trim();
+    // 从容器元素读取（popup 关闭后容器仍在内存中）
+    const tableName = (container.querySelector('#cff-name')?.value || '新表格').trim();
     const selectedUids = Array.from(
-        document.querySelectorAll('.cff-cb:checked'),
+        container.querySelectorAll('.cff-cb:checked'),
     ).map(cb => cb.value);
 
     if (selectedUids.length === 0) return null;
@@ -385,18 +375,19 @@ export async function createSheetFromFields(scope) {
     const fields = selectedUids.map(uid => lib.find(f => f.uid === uid)).filter(Boolean);
     const colCount = fields.length + 1; // +1 为 sheet_origin 占位列
 
-    // 创建 sheet/template（不立即保存，由下面统一设置后再保存）
+    // 根据域创建对应类型的表格
     let newSheet;
     if (scope === 'chat') {
         newSheet = BASE.createChatSheet(colCount, 2);
+    } else if (scope === 'role') {
+        newSheet = new BASE.SheetTemplate().createNewRoleTemplate(colCount, 2);
     } else {
         newSheet = new BASE.SheetTemplate().createNewTemplate(colCount, 2, false);
     }
 
     newSheet.name = tableName;
 
-    // 将字段数据写入列标题单元格
-    // hashSheet[0][0] 是 sheet_origin，字段从 [0][1] 开始
+    // 将字段数据写入列标题单元格（hashSheet[0][0] 是 sheet_origin，字段从 [0][1] 起）
     fields.forEach((field, i) => {
         const colHeader = newSheet.cells.get(newSheet.hashSheet[0][i + 1]);
         if (colHeader) {
@@ -405,7 +396,6 @@ export async function createSheetFromFields(scope) {
         }
     });
 
-    // 保存（chat 域 save 写入 chatMetadata.sheets；global 域 save 写入 table_database_templates）
     newSheet.save();
     return newSheet;
 }
