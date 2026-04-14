@@ -1,6 +1,8 @@
 import { APP, BASE, DERIVED, EDITOR, SYSTEM, USER } from './core/manager.js';
 import { openTableRendererPopup, updateSystemMessageTableStatus } from "./scripts/renderer/tablePushToChat.js";
 import { loadSettings } from "./scripts/settings/userExtensionSetting.js";
+import { MemoryManager } from './core/memory/memoryManager.js';
+import { initMemoryTableEditor } from './scripts/settings/memoryTableEditor.js';
 import { ext_getAllTables, ext_exportAllTablesAsJson } from './scripts/settings/standaloneAPI.js';
 import { openTableDebugLogPopup } from "./scripts/settings/devConsole.js";
 import { TableTwoStepSummary } from "./scripts/runtime/separateTableUpdate.js";
@@ -563,6 +565,27 @@ function getMesRole() {
 async function onChatCompletionPromptReady(eventData) {
     try {
         const effectiveSettings = getEffectiveTemplateSettings();
+
+        // ── 记忆模式：注入 <memory> 块 ──────────────────────────────
+        if (MemoryManager.isMemoryModeEnabled()) {
+            if (
+                USER.tableBaseSetting.isExtensionAble === true &&
+                USER.tableBaseSetting.isAiReadTable === true &&
+                effectiveSettings.injection_mode !== 'injection_off' &&
+                eventData.dryRun !== true
+            ) {
+                const memoryPrompt = MemoryManager.buildMemoryPrompt();
+                if (memoryPrompt) {
+                    if (effectiveSettings.deep === 0)
+                        eventData.chat.push({ role: getMesRole(), content: memoryPrompt });
+                    else
+                        eventData.chat.splice(-effectiveSettings.deep, 0, { role: getMesRole(), content: memoryPrompt });
+                    console.log('[记忆模式] 已注入记忆提示词', memoryPrompt.slice(0, 120));
+                }
+            }
+            return; // 记忆模式不走旧版 tableEdit 注入
+        }
+
         // 优先处理分步填表模式
         if (USER.tableBaseSetting.step_by_step === true) {
             // 仅当插件和AI读表功能开启,注入模式不是关闭注入时才注入
@@ -676,9 +699,24 @@ export function getTableEditTag(mes) {
  * @param this_edit_mes_id 此消息的ID
  */
 async function onMessageEdited(this_edit_mes_id) {
-    if (USER.tableBaseSetting.isExtensionAble === false || USER.tableBaseSetting.step_by_step === true) return
+    if (USER.tableBaseSetting.isExtensionAble === false) return
     const chat = USER.getContext().chat[this_edit_mes_id]
-    if (chat.is_user === true || USER.tableBaseSetting.isAiWriteTable === false) return
+    if (chat.is_user === true) return
+
+    // ── 记忆模式 ───────────────────────────────────────────────────
+    if (MemoryManager.isMemoryModeEnabled()) {
+        if (USER.tableBaseSetting.isAiWriteTable !== false && MemoryManager.hasMemoryEdit(chat.mes)) {
+            try {
+                MemoryManager.applyMemoryEdit(chat.mes);
+            } catch (error) {
+                EDITOR.error('记忆插件（记忆模式）：编辑消息更新记忆失败\n原因：', error.message, error);
+            }
+        }
+        updateSheetsView();
+        return;
+    }
+
+    if (USER.tableBaseSetting.step_by_step === true || USER.tableBaseSetting.isAiWriteTable === false) return
     try {
         handleEditStrInMessage(chat, parseInt(this_edit_mes_id))
     } catch (error) {
@@ -693,6 +731,24 @@ async function onMessageEdited(this_edit_mes_id) {
  */
 async function onMessageReceived(chat_id) {
     if (USER.tableBaseSetting.isExtensionAble === false) return
+
+    // ── 记忆模式：解析 <memoryEdit> 标签 ──────────────────────────
+    if (MemoryManager.isMemoryModeEnabled()) {
+        if (USER.tableBaseSetting.isAiWriteTable !== false) {
+            const chat = USER.getContext().chat[chat_id];
+            if (chat && !chat.is_user && MemoryManager.hasMemoryEdit(chat.mes)) {
+                try {
+                    const changed = MemoryManager.applyMemoryEdit(chat.mes);
+                    console.log('[记忆模式] 解析 <memoryEdit>，changed=', changed);
+                } catch (error) {
+                    EDITOR.error('记忆插件（记忆模式）：更新记忆失败\n原因：', error.message, error);
+                }
+            }
+        }
+        updateSheetsView();
+        return;
+    }
+
     if (USER.tableBaseSetting.step_by_step === true && USER.getContext().chat.length > 2) {
         TableTwoStepSummary("auto");  // 请勿使用await，否则会导致主进程阻塞引起的连锁bug
     } else {
@@ -898,6 +954,12 @@ jQuery(async () => {
 
     // 应用程序启动时加载设置
     loadSettings();
+
+    // 初始化记忆表格编辑器（记忆模式 UI）
+    const memEditorContainer = document.querySelector('#memory_mode_editor_section');
+    if (memEditorContainer) {
+        initMemoryTableEditor(memEditorContainer);
+    }
 
     // 表格弹出窗
     $(document).on('click', '.open_table_by_id', function () {

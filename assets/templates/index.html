@@ -424,6 +424,23 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- ─── 记忆模式（Memory Mode）─── -->
+                    <div class="inline-drawer wide100p" style="margin-top: 10px;">
+                        <div class="inline-drawer-toggle inline-drawer-header">
+                            <b><span>记忆模式（Memory Mode）</span></b>
+                            <div class="fa-solid fa-circle-chevron-down inline-drawer-icon down"></div>
+                        </div>
+                        <div class="inline-drawer-content" style="display: none; padding: 10px;">
+                            <small style="color:#aaa;display:block;margin-bottom:8px">
+                                字段式记忆系统：用户自定义表结构与显示模板，AI 以 &lt;memoryEdit&gt; 标签增删改记忆。
+                                与旧版表格系统互斥，开启此模式后旧版 &lt;tableEdit&gt; 将不再生效。
+                            </small>
+                            <!-- 记忆表格编辑器由 JS 动态挂载 -->
+                            <div id="memory_mode_editor_section"></div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>

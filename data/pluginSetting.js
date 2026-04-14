@@ -144,6 +144,15 @@ export const defaultSettings = await switchLanguage('__defaultSettings__', {
     updateIndex:3,
     /**
      * ===========================
+     * 记忆模式设置（Memory Mode）
+     * ===========================
+     */
+    // 记忆模式总开关：开启后使用字段式记忆表格，AI 以 <memoryEdit> 更新记忆
+    memory_mode: false,
+    // 记忆表格 schema 列表（全局级，角色级存储在角色卡扩展数据中）
+    memory_tables: [],
+    /**
+     * ===========================
      * 注入设置
      * ===========================
      */
