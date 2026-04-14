@@ -95,7 +95,7 @@ export const USER = {
     getCharacterExtensionData() {
         try {
             const ctx = APP.getContext();
-            const chid = ctx.this_chid;
+            const chid = ctx.characterId ?? ctx.this_chid;
             if (chid === null || chid === undefined) return null;
             const char = ctx.characters?.[chid];
             if (!char) return null;
